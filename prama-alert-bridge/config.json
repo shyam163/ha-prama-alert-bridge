@@ -1,0 +1,39 @@
+{
+  "name": "Prama Alert Bridge",
+  "version": "1.0.0",
+  "slug": "prama_alert_bridge",
+  "description": "Bridges Prama camera AI human/vehicle detection to Home Assistant via MQTT auto-discovery",
+  "url": "https://github.com/shyam-prama/ha-prama-alert-bridge",
+  "arch": ["amd64", "aarch64", "armv7", "armhf", "i386"],
+  "startup": "application",
+  "boot": "auto",
+  "init": false,
+  "timeout": 30,
+  "options": {
+    "camera_host": "",
+    "camera_username": "admin",
+    "camera_password": "",
+    "mqtt_host": "",
+    "mqtt_port": 1883,
+    "mqtt_username": "",
+    "mqtt_password": "",
+    "detection_types": ["human"],
+    "off_delay": 120,
+    "sensor_name": "prama",
+    "log_level": "info"
+  },
+  "schema": {
+    "camera_host": "str",
+    "camera_username": "str",
+    "camera_password": "password",
+    "mqtt_host": "str",
+    "mqtt_port": "port",
+    "mqtt_username": "str",
+    "mqtt_password": "password",
+    "detection_types": ["str"],
+    "off_delay": "int(10,600)",
+    "sensor_name": "str",
+    "log_level": "list(debug|info|warning|error)"
+  },
+  "map": ["config:rw"]
+}
