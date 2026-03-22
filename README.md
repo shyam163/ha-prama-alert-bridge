@@ -12,7 +12,7 @@ Prama IP cameras have powerful on-device AI that classifies motion as human or v
 2. Click the **⋮** menu (top right) → **Repositories**
 3. Add this repository URL:
    ```
-   https://github.com/shyam-prama/ha-prama-alert-bridge
+   https://github.com/shyam163/ha-prama-alert-bridge
    ```
 4. Find **Prama Alert Bridge** in the store and click **Install**
 5. Configure your camera IP, credentials, and MQTT broker details

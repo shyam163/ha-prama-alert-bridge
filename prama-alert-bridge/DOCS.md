@@ -141,4 +141,4 @@ Should work with other Prama cameras that use the `pramaAPI` protocol with `aler
 
 ## Protocol Reference
 
-See [pramaproto.md](https://github.com/shyam-prama/ha-prama-alert-bridge/blob/main/pramaproto.md) for the complete reverse-engineered Prama API documentation.
+See [pramaproto.md](https://github.com/shyam163/ha-prama-alert-bridge/blob/main/pramaproto.md) for the complete reverse-engineered Prama API documentation.
