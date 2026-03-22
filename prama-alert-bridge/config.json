@@ -1,9 +1,8 @@
 {
   "name": "Prama Alert Bridge",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "slug": "prama_alert_bridge",
   "description": "Bridges Prama camera AI human/vehicle detection to Home Assistant via MQTT auto-discovery",
-  "url": "https://github.com/shyam163/ha-prama-alert-bridge",
   "arch": ["amd64", "aarch64", "armv7", "armhf", "i386"],
   "startup": "application",
   "boot": "auto",
