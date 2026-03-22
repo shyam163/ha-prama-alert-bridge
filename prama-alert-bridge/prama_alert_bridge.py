@@ -137,7 +137,19 @@ def stream_alerts(config, mqtt_client, topics):
     cam = config["camera"]
     url = f"https://{cam['host']}/pramaAPI/Event/notification/alertStream"
     auth = HTTPDigestAuth(cam["username"], cam["password"])
-    detection_types = set(config.get("detection", {}).get("types", ["human"]))
+    raw_types = config.get("detection", {}).get("types", ["human"])
+    # Handle types being strings, dicts, or nested structures from YAML parsing
+    detection_types = set()
+    if isinstance(raw_types, list):
+        for t in raw_types:
+            if isinstance(t, str):
+                detection_types.add(t)
+            elif isinstance(t, dict):
+                detection_types.update(t.values())
+    elif isinstance(raw_types, str):
+        detection_types = {t.strip() for t in raw_types.split(",")}
+    else:
+        detection_types = {"human"}
 
     log.info("Connecting to alert stream at %s", cam["host"])
 

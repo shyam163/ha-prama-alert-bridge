@@ -12,14 +12,16 @@ OFF_DELAY=$(bashio::config 'off_delay')
 SENSOR_NAME=$(bashio::config 'sensor_name')
 LOG_LEVEL=$(bashio::config 'log_level')
 
-# Build detection types YAML list
-DETECTION_TYPES=""
-for type in $(bashio::config 'detection_types'); do
-    DETECTION_TYPES="${DETECTION_TYPES}    - ${type}\n"
+# Build detection types list from JSON array
+TYPES_YAML=""
+for index in $(bashio::config 'detection_types|keys[]'); do
+    type=$(bashio::config "detection_types[${index}]")
+    TYPES_YAML="${TYPES_YAML}    - ${type}
+"
 done
 
 # Generate config.yaml from add-on options
-cat > /app/config.yaml <<EOF
+cat > /app/config.yaml <<ENDOFCONFIG
 camera:
   host: "${CAMERA_HOST}"
   username: "${CAMERA_USER}"
@@ -33,11 +35,14 @@ mqtt:
 
 detection:
   types:
-$(echo -e "${DETECTION_TYPES}")  off_delay: ${OFF_DELAY}
+${TYPES_YAML}  off_delay: ${OFF_DELAY}
 
 sensor_name: "${SENSOR_NAME}"
 log_level: "${LOG_LEVEL}"
-EOF
+ENDOFCONFIG
+
+bashio::log.info "Generated config.yaml:"
+cat /app/config.yaml
 
 bashio::log.info "Prama Alert Bridge starting..."
 bashio::log.info "Camera: ${CAMERA_HOST}"
