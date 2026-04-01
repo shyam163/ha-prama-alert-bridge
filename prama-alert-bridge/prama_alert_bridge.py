@@ -1,18 +1,19 @@
 #!/usr/bin/env python3
 """Prama Camera Alert Stream → MQTT Bridge for Home Assistant.
 
-Connects to the Prama camera's proprietary alertStream endpoint,
+Connects to one or more Prama camera alertStream endpoints,
 parses XML events for human/vehicle detection, and publishes to MQTT
-with HA auto-discovery so the binary_sensor is created automatically.
+with HA auto-discovery so binary_sensors are created automatically.
 
 Compatible with Prama cameras using the pramaAPI protocol
-(tested on PT-NC163D3-WNM(D2), firmware V5.8.5).
+(tested on PT-NC163D3-WNM(D2) and PT-NC140D7-WNMS/AW(D2), firmware V5.8.5).
 """
 
 import json
 import logging
 import signal
 import sys
+import threading
 import time
 import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
@@ -53,27 +54,29 @@ def setup_logging(config):
     return logging.getLogger("prama_bridge")
 
 
-def setup_mqtt(config, sensor_name):
-    """Connect to MQTT broker and publish HA auto-discovery config."""
-    client = mqtt.Client(
-        client_id=f"prama_alert_bridge_{sensor_name}", protocol=mqtt.MQTTv311
-    )
+def setup_mqtt(config):
+    """Connect to MQTT broker. Returns the shared client."""
+    client = mqtt.Client(client_id="prama_alert_bridge", protocol=mqtt.MQTTv311)
     mqtt_cfg = config["mqtt"]
 
     if mqtt_cfg.get("username"):
         client.username_pw_set(mqtt_cfg["username"], mqtt_cfg.get("password", ""))
 
+    client.connect(mqtt_cfg["host"], mqtt_cfg.get("port", 1883), keepalive=60)
+    client.loop_start()
+    log.info("MQTT connected to %s:%s", mqtt_cfg["host"], mqtt_cfg.get("port", 1883))
+    return client
+
+
+def publish_camera_discovery(mqtt_client, cam_cfg):
+    """Publish HA MQTT auto-discovery config for one camera. Returns topics dict."""
+    sensor_name = cam_cfg["sensor_name"]
     state_topic = f"prama/{sensor_name}/motion/state"
     attr_topic = f"prama/{sensor_name}/motion/attributes"
     avail_topic = f"prama/{sensor_name}/motion/availability"
     discovery_topic = f"homeassistant/binary_sensor/prama_{sensor_name}/config"
 
-    client.will_set(avail_topic, "offline", retain=True)
-    client.connect(mqtt_cfg["host"], mqtt_cfg.get("port", 1883), keepalive=60)
-    client.loop_start()
-
-    # Publish HA MQTT auto-discovery config (retained)
-    off_delay = config.get("detection", {}).get("off_delay", 120)
+    off_delay = cam_cfg.get("off_delay", 120)
     friendly_name = sensor_name.replace("_", " ").title()
 
     discovery_payload = {
@@ -96,11 +99,13 @@ def setup_mqtt(config, sensor_name):
         },
     }
 
-    client.publish(discovery_topic, json.dumps(discovery_payload), retain=True)
-    client.publish(avail_topic, "online", retain=True)
-    log.info("MQTT connected, discovery config published (off_delay=%ds)", off_delay)
+    mqtt_client.publish(discovery_topic, json.dumps(discovery_payload), retain=True)
+    mqtt_client.publish(avail_topic, "online", retain=True)
+    log.info(
+        "[%s] Discovery config published (off_delay=%ds)", sensor_name, off_delay
+    )
 
-    return client, {
+    return {
         "state": state_topic,
         "attributes": attr_topic,
         "availability": avail_topic,
@@ -132,13 +137,13 @@ def parse_alert_xml(xml_text):
     }
 
 
-def stream_alerts(config, mqtt_client, topics):
-    """Connect to alertStream and process events. Returns on disconnect."""
-    cam = config["camera"]
-    url = f"https://{cam['host']}/pramaAPI/Event/notification/alertStream"
-    auth = HTTPDigestAuth(cam["username"], cam["password"])
-    raw_types = config.get("detection", {}).get("types", ["human"])
-    # Handle types being strings, dicts, or nested structures from YAML parsing
+def stream_alerts(cam_cfg, mqtt_client, topics):
+    """Connect to one camera's alertStream and process events. Returns on disconnect."""
+    sensor_name = cam_cfg["sensor_name"]
+    url = f"https://{cam_cfg['host']}/pramaAPI/Event/notification/alertStream"
+    auth = HTTPDigestAuth(cam_cfg["username"], cam_cfg["password"])
+
+    raw_types = cam_cfg.get("detection_types", ["human"])
     detection_types = set()
     if isinstance(raw_types, list):
         for t in raw_types:
@@ -151,13 +156,13 @@ def stream_alerts(config, mqtt_client, topics):
     else:
         detection_types = {"human"}
 
-    log.info("Connecting to alert stream at %s", cam["host"])
+    log.info("[%s] Connecting to alert stream at %s", sensor_name, cam_cfg["host"])
 
     response = requests.get(
-        url, auth=auth, stream=True, verify=False, timeout=(10, None)
+        url, auth=auth, stream=True, verify=False, timeout=(10, 30)
     )
     response.raise_for_status()
-    log.info("Alert stream connected (HTTP %d)", response.status_code)
+    log.info("[%s] Alert stream connected (HTTP %d)", sensor_name, response.status_code)
 
     buffer = ""
     for chunk in response.iter_content(chunk_size=4096, decode_unicode=True):
@@ -167,19 +172,16 @@ def stream_alerts(config, mqtt_client, topics):
         if chunk is None:
             continue
 
-        # Handle bytes vs str
         if isinstance(chunk, bytes):
             chunk = chunk.decode("utf-8", errors="replace")
 
         buffer += chunk
 
-        # Split on boundary markers
         while "--boundary" in buffer:
             parts = buffer.split("--boundary", 1)
             event_block = parts[0]
             buffer = parts[1] if len(parts) > 1 else ""
 
-            # Extract XML from the event block
             xml_start = event_block.find("<EventNotificationAlert")
             xml_end = event_block.find("</EventNotificationAlert>")
             if xml_start == -1 or xml_end == -1:
@@ -193,22 +195,20 @@ def stream_alerts(config, mqtt_client, topics):
                 continue
 
             log.debug(
-                "Event: type=%s state=%s target=%s",
+                "[%s] Event: type=%s state=%s target=%s",
+                sensor_name,
                 alert["event_type"],
                 alert["event_state"],
                 alert["target_type"],
             )
 
-            # Only act on VMD events with matching target type
             if alert["event_type"] != "VMD":
                 continue
             if alert["target_type"] not in detection_types:
                 continue
 
-            # Publish ON state
             mqtt_client.publish(topics["state"], "ON")
 
-            # Publish attributes
             attrs = {
                 "last_detection_time": alert["date_time"]
                 or datetime.now(timezone.utc).isoformat(),
@@ -219,11 +219,43 @@ def stream_alerts(config, mqtt_client, topics):
             mqtt_client.publish(topics["attributes"], json.dumps(attrs))
 
             log.info(
-                "%s detected! Published ON (target=%s, time=%s)",
+                "[%s] %s detected! Published ON (target=%s, time=%s)",
+                sensor_name,
                 alert["target_type"].capitalize(),
                 alert["target_type"],
                 alert["date_time"],
             )
+
+
+def camera_thread(cam_cfg, mqtt_client):
+    """Run stream_alerts in a reconnect loop for one camera."""
+    sensor_name = cam_cfg["sensor_name"]
+    topics = publish_camera_discovery(mqtt_client, cam_cfg)
+    backoff = 5
+    max_backoff = 60
+
+    try:
+        while running:
+            try:
+                stream_alerts(cam_cfg, mqtt_client, topics)
+                backoff = 5
+            except requests.exceptions.RequestException as e:
+                log.error("[%s] Stream connection error: %s", sensor_name, e)
+            except Exception as e:
+                log.error("[%s] Unexpected error: %s", sensor_name, e, exc_info=True)
+
+            if not running:
+                break
+
+            log.info("[%s] Reconnecting in %ds...", sensor_name, backoff)
+            for _ in range(backoff):
+                if not running:
+                    break
+                time.sleep(1)
+            backoff = min(backoff * 2, max_backoff)
+    finally:
+        mqtt_client.publish(topics["availability"], "offline", retain=True)
+        log.info("[%s] Camera thread stopped", sensor_name)
 
 
 def main():
@@ -232,34 +264,39 @@ def main():
     global log
     log = setup_logging(config)
 
-    sensor_name = config.get("sensor_name", "prama")
-    mqtt_client, topics = setup_mqtt(config, sensor_name)
+    mqtt_client = setup_mqtt(config)
 
-    backoff = 5
-    max_backoff = 60
+    cameras = config.get("cameras", [])
+    if not cameras:
+        log.error("No cameras configured")
+        return
+
+    log.info("Starting bridge for %d camera(s)", len(cameras))
+
+    threads = []
+    for cam_cfg in cameras:
+        t = threading.Thread(
+            target=camera_thread,
+            args=(cam_cfg, mqtt_client),
+            name=f"cam-{cam_cfg['sensor_name']}",
+            daemon=True,
+        )
+        t.start()
+        threads.append(t)
+        log.info(
+            "Started thread for camera %s (%s)",
+            cam_cfg["sensor_name"],
+            cam_cfg["host"],
+        )
 
     try:
         while running:
-            try:
-                stream_alerts(config, mqtt_client, topics)
-                backoff = 5  # Reset on clean disconnect
-            except requests.exceptions.RequestException as e:
-                log.error("Stream connection error: %s", e)
-            except Exception as e:
-                log.error("Unexpected error: %s", e, exc_info=True)
-
-            if not running:
-                break
-
-            log.info("Reconnecting in %ds...", backoff)
-            # Sleep in small increments so we can respond to shutdown signals
-            for _ in range(backoff):
-                if not running:
-                    break
-                time.sleep(1)
-            backoff = min(backoff * 2, max_backoff)
+            time.sleep(1)
     finally:
-        mqtt_client.publish(topics["availability"], "offline", retain=True)
+        global running
+        running = False
+        for t in threads:
+            t.join(timeout=10)
         mqtt_client.loop_stop()
         mqtt_client.disconnect()
         log.info("Bridge stopped")

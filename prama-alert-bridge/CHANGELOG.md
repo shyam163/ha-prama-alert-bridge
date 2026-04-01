@@ -1,5 +1,14 @@
 # Changelog
 
+## 2.0.0
+
+- **BREAKING:** Multi-camera support in a single add-on instance
+- Config restructured: camera settings now in a `cameras` array
+- Each camera runs in its own thread with independent reconnect backoff
+- MQTT settings shared across all cameras
+- Each camera gets its own sensor_name, detection_types, and off_delay
+- If upgrading from 1.x, you must reconfigure the add-on
+
 ## 1.0.0
 
 - Initial release

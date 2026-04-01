@@ -2,77 +2,82 @@
 
 ## Overview
 
-This add-on bridges the **Prama camera's AI-powered human and vehicle detection** to Home Assistant via MQTT. Prama cameras (e.g., PT-NC163D3-WNM(D2)) have on-device AI that classifies motion targets, but this data is only available through a proprietary HTTP API — not through standard protocols like ONVIF.
+This add-on bridges **one or more Prama cameras' AI-powered human and vehicle detection** to Home Assistant via MQTT. Prama cameras (e.g., PT-NC163D3-WNM(D2), PT-NC140D7-WNMS/AW(D2)) have on-device AI that classifies motion targets, but this data is only available through a proprietary HTTP API — not through standard protocols like ONVIF.
 
-The add-on connects to the camera's alert stream, filters for the detection types you care about, and publishes events to MQTT with Home Assistant auto-discovery. This creates a `binary_sensor` entity that behaves identically to ONVIF motion sensors from other cameras.
+The add-on connects to each camera's alert stream in parallel, filters for the detection types you care about, and publishes events to MQTT with Home Assistant auto-discovery. Each camera gets its own `binary_sensor` entity.
 
 ## How It Works
 
 ```
-Prama Camera                  This Add-on                Home Assistant
-┌─────────────┐    HTTPS     ┌────────────────┐  MQTT   ┌─────────────┐
-│ alertStream  │────────────→│ Alert Bridge    │────────→│ Mosquitto   │
-│ (pramaAPI)   │  multipart  │ Parse XML       │         │ Broker      │
-│              │  XML events │ Filter VMD      │  auto   │             │
-│ On-device AI │             │ Publish ON      │ discov. │ binary_     │
-│ human/vehicle│             │                 │────────→│ sensor.*    │
-└─────────────┘             └────────────────┘         └─────────────┘
+Prama Camera 1  ─┐              This Add-on                Home Assistant
+                  ├─ HTTPS ──→  ┌────────────────┐  MQTT   ┌─────────────┐
+Prama Camera 2  ─┘  multipart  │ Thread per cam  │────────→│ Mosquitto   │
+                     XML events │ Parse XML       │         │ Broker      │
+                                │ Filter VMD      │  auto   │             │
+                                │ Publish ON      │ discov. │ binary_     │
+                                │                 │────────→│ sensor.*    │
+                                └────────────────┘         └─────────────┘
 ```
 
 1. Connects to `https://<camera>/pramaAPI/Event/notification/alertStream` with HTTP Digest Auth
-2. Reads the multipart chunked response, splits on `--boundary`, parses XML
-3. Filters for `eventType=VMD` with matching `targetType` (human/vehicle)
-4. Publishes `ON` to MQTT state topic on each detection
-5. Home Assistant auto-creates the `binary_sensor` via MQTT discovery
-6. The sensor auto-turns OFF after the configured timeout (off_delay)
+2. Runs one thread per camera, each with independent reconnect backoff
+3. Reads the multipart chunked response, splits on `--boundary`, parses XML
+4. Filters for `eventType=VMD` with matching `targetType` (human/vehicle)
+5. Publishes `ON` to MQTT state topic on each detection
+6. Home Assistant auto-creates the `binary_sensor` via MQTT discovery
+7. The sensor auto-turns OFF after the configured timeout (off_delay)
 
 ## Prerequisites
 
-- **Prama IP camera** with AI detection capability (tested on PT-NC163D3-WNM(D2))
+- **Prama IP camera(s)** with AI detection capability
 - **Mosquitto MQTT broker** add-on installed and running in Home Assistant
 - **MQTT integration** configured in Home Assistant
-- Camera must be reachable from Home Assistant over the network
+- Camera(s) must be reachable from Home Assistant over the network
 
 ## Configuration
 
-### Camera Host
+### Cameras
+
+Add one or more cameras to the list. Each camera has its own settings:
+
+#### Camera Host
 The IP address of your Prama camera (e.g., `192.168.1.44`). The camera must be reachable via HTTPS on port 443.
 
-### Camera Credentials
+#### Camera Credentials
 The admin username and password for your camera. These are the same credentials you use to log into the camera's web UI.
 
-### MQTT Settings
-Point to your MQTT broker. If you're using the Mosquitto add-on in HA, the host is your Home Assistant IP address (e.g., `192.168.1.20`), port 1883.
-
-### Detection Types
-Choose which AI detection types to bridge:
-- **human** — triggers on people
-- **vehicle** — triggers on cars, trucks, motorcycles
-
-You can select both to trigger on any classified motion.
-
-### Off Delay
-The occupancy timeout in seconds (default: 120). The sensor stays ON as long as detections keep arriving. Once no detection is received for this many seconds, the sensor turns OFF.
-
-This matches the `motion_detected_with_occupancy_timeout` pattern used by ONVIF cameras in Home Assistant.
-
-### Sensor Name
-A short identifier used in the entity ID and MQTT topics. Default: `prama`.
+#### Sensor Name
+A short unique identifier for this camera. Used in the entity ID and MQTT topics. Default: `prama`.
 
 - Entity created: `binary_sensor.motion_detected_with_occupancy_timeout_<sensor_name>`
 - MQTT topics: `prama/<sensor_name>/motion/state`
 
-For multiple cameras, use distinct names like `prama_front`, `prama_back`.
+**Must be unique per camera.** Examples: `prama_front`, `prama_back`, `prama_6mp`.
+
+#### Detection Types
+Choose which AI detection types to bridge per camera:
+- **human** — triggers on people
+- **vehicle** — triggers on cars, trucks, motorcycles
+
+#### Off Delay
+The occupancy timeout in seconds (default: 120). The sensor stays ON as long as detections keep arriving. Once no detection is received for this many seconds, the sensor turns OFF.
+
+### MQTT Settings
+Shared across all cameras. Point to your MQTT broker. If you're using the Mosquitto add-on in HA, the host is your Home Assistant IP address (e.g., `192.168.1.20`), port 1883.
 
 ## Multi-Camera Setup
 
-To monitor multiple Prama cameras, install one instance of this add-on per camera. Each instance needs a unique `sensor_name` to avoid MQTT topic conflicts.
+Add multiple entries to the **Cameras** list in the configuration. Each camera runs in its own thread with independent reconnect — if one camera goes offline, the others continue normally.
 
-Alternatively, future versions may support multiple cameras in a single instance.
+Example with two cameras:
+- Camera 1: host `192.168.1.44`, sensor_name `prama_6mp`
+- Camera 2: host `192.168.1.35`, sensor_name `prama_4mp`
 
-## Entity Created
+This creates two independent binary_sensor entities.
 
-The add-on auto-creates via MQTT discovery:
+## Entities Created
+
+Per camera, the add-on auto-creates via MQTT discovery:
 
 **Entity ID:** `binary_sensor.motion_detected_with_occupancy_timeout_<sensor_name>`
 
@@ -84,37 +89,6 @@ The add-on auto-creates via MQTT discovery:
 | `channel` | Camera channel ID |
 | `event_state` | `active` or `inactive` |
 
-## Dashboard Usage
-
-### Conditional Camera Card
-Show the camera feed only when motion is detected:
-
-```yaml
-type: picture-entity
-entity: camera.your_prama_camera
-camera_view: live
-visibility:
-  - condition: state
-    entity: binary_sensor.motion_detected_with_occupancy_timeout_prama
-    state: "on"
-```
-
-### Motion Badge
-Show a badge in the header when motion is active:
-
-```yaml
-type: entity
-entity: binary_sensor.motion_detected_with_occupancy_timeout_prama
-name: Prama
-icon: mdi:motion-sensor
-color: accent
-state_content: last_changed
-visibility:
-  - condition: state
-    entity: binary_sensor.motion_detected_with_occupancy_timeout_prama
-    state: "on"
-```
-
 ## Troubleshooting
 
 ### No events detected
@@ -125,7 +99,7 @@ visibility:
 ### Connection errors
 - Ensure the camera is reachable from HA (`ping <camera_ip>`)
 - Verify camera credentials work in the web UI (`https://<camera_ip>/doc/index.html`)
-- The add-on auto-reconnects with exponential backoff (5s → 60s)
+- The add-on auto-reconnects with exponential backoff (5s → 60s) per camera
 
 ### Entity not appearing in HA
 - Verify the MQTT integration is configured in HA
@@ -135,9 +109,14 @@ visibility:
 ## Supported Cameras
 
 Tested on:
-- **Prama PT-NC163D3-WNM(D2)** (firmware V5.8.5)
+- **Prama PT-NC163D3-WNM(D2)** (6MP, firmware V5.8.5)
+- **Prama PT-NC140D7-WNMS/AW(D2)** (4MP, firmware V5.8.5)
 
-Should work with other Prama cameras that use the `pramaAPI` protocol with `alertStream` endpoint. The key requirement is that the camera supports `eventType=VMD` with `targetType` classification.
+Should work with other Prama cameras that use the `pramaAPI` protocol with `alertStream` endpoint.
+
+## Upgrading from 1.x
+
+Version 2.0.0 is a **breaking change**. The configuration structure changed from flat camera fields to a `cameras` array. After upgrading, you must reconfigure the add-on through the UI.
 
 ## Protocol Reference
 

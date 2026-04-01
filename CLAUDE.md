@@ -87,7 +87,7 @@ See `pramaproto.md` for the complete reverse-engineered protocol reference.
 - Human detection is ONLY available via pramaAPI, NOT via ONVIF
 - ONVIF must be explicitly enabled in camera web UI (disabled by default)
 - Both PT-NC163D3 (6MP) and PT-NC140D7 (4MP) use identical pramaAPI
-- Each camera needs its own bridge add-on instance with a unique `sensor_name`
+- Single add-on instance supports multiple cameras (v2.0.0+) via `cameras` array in config
 
 ## Development
 
