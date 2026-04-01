@@ -1,8 +1,27 @@
 # Prama Alert Bridge
 
+## Scope
+
+This project is exclusively for **Prama cameras**. The network also has 6 TP-Link VIGI cameras (at .201-.206) — those use ONVIF natively and are NOT part of this project.
+
 ## What This Is
 
-A Home Assistant add-on that bridges the Prama camera's proprietary AI human/vehicle detection to Home Assistant via MQTT. The Prama camera (PT-NC163D3-WNM(D2)) has on-device AI that classifies motion targets as human or vehicle, but this is only exposed through a proprietary HTTP streaming API — not through standard ONVIF. This bridge fills that gap.
+A Home Assistant add-on that bridges the Prama camera's proprietary AI human/vehicle detection to Home Assistant via MQTT. Prama cameras have on-device AI that classifies motion targets as human or vehicle, but this is only exposed through a proprietary HTTP streaming API — not through standard ONVIF. This bridge fills that gap.
+
+## Cameras
+
+| Camera | Model | IP | MAC | Area | HA ONVIF Name | Status |
+|--------|-------|----|-----|------|---------------|--------|
+| Prama 6MP | PT-NC163D3-WNM(D2) | *(was 192.168.1.44, currently unknown)* | e4:28:a4:6b:88:55 | matt | six_mp_one | unavailable |
+| Prama 4MP | PT-NC140D7-WNMS/AW(D2) | 192.168.1.35 | e4:28:a4:6e:e8:42 | *(not yet assigned)* | *(not yet added)* | new |
+
+Both run firmware V5.8.5 (build 250729) and use the same pramaAPI protocol.
+
+## Credentials
+
+- **Web UI / pramaAPI (HTTP Digest Auth):** `admin` / `Py03.1949` — same for all cameras
+- **ONVIF:** `xxx` / `py03.1949` — same for all cameras
+- **MQTT broker (192.168.1.20):** `xxx` / `yyy`
 
 ## Architecture
 
@@ -67,7 +86,8 @@ See `pramaproto.md` for the complete reverse-engineered protocol reference.
 - Alert stream is multipart HTTP with `--boundary` separators
 - Human detection is ONLY available via pramaAPI, NOT via ONVIF
 - ONVIF must be explicitly enabled in camera web UI (disabled by default)
-- Camera registered in HA ONVIF as `six_mp_one` (from its internal 6MP profile name)
+- Both PT-NC163D3 (6MP) and PT-NC140D7 (4MP) use identical pramaAPI
+- Each camera needs its own bridge add-on instance with a unique `sensor_name`
 
 ## Development
 
