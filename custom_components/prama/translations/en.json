@@ -1,0 +1,53 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Prama Camera Connection",
+        "description": "Enter the camera's IP address and pramaAPI credentials. The connection will be tested before proceeding.",
+        "data": {
+          "camera_host": "Camera Host",
+          "prama_username": "Username",
+          "prama_password": "Password"
+        },
+        "data_description": {
+          "camera_host": "IP address or hostname (e.g., 192.168.1.44)",
+          "prama_username": "Camera web UI username (default: admin)",
+          "prama_password": "Camera web UI password"
+        }
+      },
+      "onvif": {
+        "title": "ONVIF Configuration (Optional)",
+        "description": "Optionally provide ONVIF credentials to auto-register this camera for RTSP video streaming in Home Assistant.",
+        "data": {
+          "onvif_enabled": "Enable ONVIF auto-registration",
+          "onvif_username": "ONVIF Username",
+          "onvif_password": "ONVIF Password",
+          "onvif_port": "ONVIF Port"
+        }
+      },
+      "sensors": {
+        "title": "Sensor Settings",
+        "description": "Configure the motion detection sensor. Camera: {model} (firmware {firmware}).",
+        "data": {
+          "sensor_name": "Sensor Name",
+          "detection_types": "Detection Types",
+          "off_delay": "Auto-off Delay (seconds)"
+        },
+        "data_description": {
+          "sensor_name": "Used in entity ID (e.g., prama_front). Lowercase with underscores only.",
+          "detection_types": "AI detection types to monitor",
+          "off_delay": "Seconds after last detection before sensor turns off (10-600)"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Cannot connect to camera. Check host and network.",
+      "invalid_auth": "Invalid credentials. Check username and password.",
+      "onvif_failed": "ONVIF connection failed. You can continue without it.",
+      "unknown": "An unexpected error occurred."
+    },
+    "abort": {
+      "already_configured": "This camera is already configured."
+    }
+  }
+}
