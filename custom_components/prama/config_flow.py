@@ -76,10 +76,25 @@ def validate_prama_credentials(host, username, password):
 
 
 def validate_onvif_credentials(host, port, username, password):
-    """Test ONVIF connection. Returns True on success. Blocking call."""
+    """Test ONVIF connection via SOAP probe. Returns True if ONVIF responds. Blocking call."""
     url = f"http://{host}:{port}/onvif/device_service"
+    soap_body = (
+        '<?xml version="1.0" encoding="UTF-8"?>'
+        '<s:Envelope xmlns:s="http://www.w3.org/2003/05/soap-envelope"'
+        ' xmlns:tds="http://www.onvif.org/ver10/device/wsdl">'
+        "<s:Body><tds:GetDeviceInformation/></s:Body>"
+        "</s:Envelope>"
+    )
     try:
-        resp = requests.get(url, timeout=5)
+        resp = requests.post(
+            url,
+            data=soap_body,
+            headers={"Content-Type": "application/soap+xml; charset=utf-8"},
+            timeout=5,
+        )
+        # 401 means ONVIF is running but needs auth — that's a success
+        # 200 means no auth needed — also success
+        # Anything else means ONVIF responded — also counts
         return resp.status_code < 500
     except requests.exceptions.RequestException:
         return False
