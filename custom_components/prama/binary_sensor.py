@@ -44,7 +44,7 @@ async def async_setup_entry(
         host=config[CONF_CAMERA_HOST],
         username=config[CONF_PRAMA_USERNAME],
         password=config[CONF_PRAMA_PASSWORD],
-        detection_types=config[CONF_DETECTION_TYPES],
+        detection_types=config.get(CONF_DETECTION_TYPES, ["human"]),
         callback=sensor.handle_alert,
     )
 
@@ -70,8 +70,8 @@ class PramaMotionBinarySensor(BinarySensorEntity):
     def __init__(self, hass: HomeAssistant, entry: ConfigEntry, config: dict):
         self.hass = hass
         self._entry = entry
-        self._sensor_name = config[CONF_SENSOR_NAME]
-        self._off_delay = config[CONF_OFF_DELAY]
+        self._sensor_name = config.get(CONF_SENSOR_NAME, "prama")
+        self._off_delay = config.get(CONF_OFF_DELAY, 120)
 
         self._attr_unique_id = f"prama_{self._sensor_name}_motion"
         self._attr_name = "Motion"
