@@ -54,12 +54,11 @@ def parse_alert_xml(xml_text):
 class AlertStreamManager:
     """Manages long-lived HTTPS connection to Prama alertStream."""
 
-    def __init__(self, hass, host, username, password, detection_types, callback):
+    def __init__(self, hass, host, username, password, callback):
         self._hass = hass
         self._host = host
         self._username = username
         self._password = password
-        self._detection_types = set(detection_types)
         self._callback = callback
         self._stop_event = threading.Event()
         self._thread = None
@@ -144,8 +143,6 @@ class AlertStreamManager:
                     continue
 
                 if alert["event_type"] != "VMD":
-                    continue
-                if alert["target_type"] not in self._detection_types:
                     continue
 
                 # Fire callback on HA event loop

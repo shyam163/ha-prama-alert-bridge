@@ -16,7 +16,6 @@ from homeassistant.helpers.event import async_call_later
 from .alert_stream import AlertStreamManager
 from .const import (
     CONF_CAMERA_HOST,
-    CONF_DETECTION_TYPES,
     CONF_OFF_DELAY,
     CONF_PRAMA_PASSWORD,
     CONF_PRAMA_USERNAME,
@@ -32,11 +31,36 @@ async def async_setup_entry(
     entry: ConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
-    """Set up Prama binary sensor from config entry."""
+    """Set up Prama binary sensors from config entry."""
     config = hass.data[DOMAIN][entry.entry_id]["config"]
+    off_delay = config.get(CONF_OFF_DELAY, 120)
 
-    sensor = PramaMotionBinarySensor(hass, entry, config)
-    async_add_entities([sensor])
+    # Create three sensors: motion (any VMD), person (human), vehicle
+    motion_sensor = PramaMotionBinarySensor(
+        hass, entry, config, "motion", "Motion", "mdi:motion-sensor", None,
+    )
+    person_sensor = PramaMotionBinarySensor(
+        hass, entry, config, "person", "Person", "mdi:human", "human",
+    )
+    vehicle_sensor = PramaMotionBinarySensor(
+        hass, entry, config, "vehicle", "Vehicle", "mdi:car", "vehicle",
+    )
+
+    async_add_entities([motion_sensor, person_sensor, vehicle_sensor])
+
+    # Dispatch callback routes events to the right sensors
+    @callback
+    def handle_alert(alert):
+        """Route alert to appropriate sensors."""
+        # Motion sensor fires on ANY VMD event
+        motion_sensor.handle_alert(alert)
+
+        # Person/vehicle sensors fire only on matching targetType
+        target = alert.get("target_type")
+        if target == "human":
+            person_sensor.handle_alert(alert)
+        elif target == "vehicle":
+            vehicle_sensor.handle_alert(alert)
 
     # Create and start the alert stream manager
     stream_manager = AlertStreamManager(
@@ -44,38 +68,44 @@ async def async_setup_entry(
         host=config[CONF_CAMERA_HOST],
         username=config[CONF_PRAMA_USERNAME],
         password=config[CONF_PRAMA_PASSWORD],
-        detection_types=config.get(CONF_DETECTION_TYPES, ["human"]),
-        callback=sensor.handle_alert,
+        callback=handle_alert,
     )
 
-    # Store reference for cleanup
     hass.data[DOMAIN][entry.entry_id]["stream_manager"] = stream_manager
-
-    # Start stream in background thread
     await hass.async_add_executor_job(stream_manager.start)
     _LOGGER.info(
-        "Started alert stream for %s (%s)",
-        config[CONF_SENSOR_NAME],
+        "Started alert stream for %s (%s) — 3 sensors (motion, person, vehicle)",
+        config.get(CONF_SENSOR_NAME, "prama"),
         config[CONF_CAMERA_HOST],
     )
 
 
 class PramaMotionBinarySensor(BinarySensorEntity):
-    """Binary sensor for Prama camera AI motion detection."""
+    """Binary sensor for Prama camera detection."""
 
     _attr_device_class = BinarySensorDeviceClass.MOTION
     _attr_should_poll = False
     _attr_has_entity_name = True
 
-    def __init__(self, hass: HomeAssistant, entry: ConfigEntry, config: dict):
+    def __init__(
+        self,
+        hass: HomeAssistant,
+        entry: ConfigEntry,
+        config: dict,
+        sensor_type: str,
+        name: str,
+        icon: str,
+        target_filter: str | None,
+    ):
         self.hass = hass
         self._entry = entry
         self._sensor_name = config.get(CONF_SENSOR_NAME, "prama")
         self._off_delay = config.get(CONF_OFF_DELAY, 120)
+        self._target_filter = target_filter
 
-        self._attr_unique_id = f"prama_{self._sensor_name}_motion"
-        self._attr_name = "Motion"
-        self._attr_icon = "mdi:motion-sensor"
+        self._attr_unique_id = f"prama_{self._sensor_name}_{sensor_type}"
+        self._attr_name = name
+        self._attr_icon = icon
         self._attr_is_on = False
 
         self._last_detection_time = None
@@ -107,7 +137,7 @@ class PramaMotionBinarySensor(BinarySensorEntity):
 
     @callback
     def handle_alert(self, alert: dict):
-        """Handle incoming alert from stream manager. Runs on HA event loop."""
+        """Handle incoming alert. Runs on HA event loop."""
         self._attr_is_on = True
         self._last_detection_time = (
             alert.get("date_time") or datetime.now(timezone.utc).isoformat()
@@ -118,11 +148,9 @@ class PramaMotionBinarySensor(BinarySensorEntity):
 
         self.async_write_ha_state()
 
-        # Cancel any existing off timer
         if self._off_timer_cancel is not None:
             self._off_timer_cancel()
 
-        # Schedule auto-off after off_delay seconds
         self._off_timer_cancel = async_call_later(
             self.hass, self._off_delay, self._async_turn_off
         )
