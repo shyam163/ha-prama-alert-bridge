@@ -1,4 +1,4 @@
-# Prama Alert Bridge
+# Prama Camera Integration
 
 ## Scope
 
@@ -6,14 +6,22 @@ This project is exclusively for **Prama cameras**. The network also has 6 TP-Lin
 
 ## What This Is
 
-A Home Assistant add-on that bridges the Prama camera's proprietary AI human/vehicle detection to Home Assistant via MQTT. Prama cameras have on-device AI that classifies motion targets as human or vehicle, but this is only exposed through a proprietary HTTP streaming API — not through standard ONVIF. This bridge fills that gap.
+A Home Assistant custom integration that bridges Prama camera proprietary AI human/vehicle detection to HA. Prama cameras have on-device AI that classifies motion targets as human or vehicle, but this is only exposed through a proprietary HTTP streaming API — not through standard ONVIF. This integration fills that gap.
+
+### Evolution
+
+Started as an MQTT-based HA add-on (v1.0–v2.0), rewritten as a native custom integration for:
+- Config flow with credential validation (no more YAML editing)
+- No MQTT dependency (direct entity creation)
+- Cleaner architecture (daemon thread + call_soon_threadsafe)
+- Key lesson: never import `requests`/`urllib3` at module top level in HA integrations — causes 500 errors on Python 3.14. Use lazy imports inside blocking functions.
 
 ## Cameras
 
-| Camera | Model | IP | MAC | Area | HA ONVIF Name | Status |
-|--------|-------|----|-----|------|---------------|--------|
-| Prama 6MP | PT-NC163D3-WNM(D2) | *(was 192.168.1.44, currently unknown)* | e4:28:a4:6b:88:55 | matt | six_mp_one | unavailable |
-| Prama 4MP | PT-NC140D7-WNMS/AW(D2) | 192.168.1.35 | e4:28:a4:6e:e8:42 | *(not yet assigned)* | *(not yet added)* | new |
+| Camera | Model | IP | MAC | Area | HA Entity | Status |
+|--------|-------|----|-----|------|-----------|--------|
+| Prama 6MP | PT-NC163D3-WNM(D2) | *(unknown — old IP .44 is now dev machine)* | e4:28:a4:6b:88:55 | matt | — | unavailable |
+| Prama 4MP | PT-NC140D7-WNMS/AW(D2) | 192.168.1.35 | e4:28:a4:6e:e8:42 | — | `binary_sensor.prama_prama_4mp_motion` | working |
 
 Both run firmware V5.8.5 (build 250729) and use the same pramaAPI protocol.
 
@@ -26,55 +34,38 @@ Both run firmware V5.8.5 (build 250729) and use the same pramaAPI protocol.
 ## Architecture
 
 ```
-Prama Camera                    This Add-on                    Home Assistant
-┌─────────────┐     HTTPS      ┌──────────────────┐   MQTT    ┌─────────────┐
-│ alertStream  │──────────────→│ prama_alert_bridge │────────→│ Mosquitto    │
-│ (Digest Auth)│  multipart    │                    │          │ Broker       │
-│              │  XML events   │ Parses XML,        │          │              │
-│ On-device AI │               │ filters VMD+human, │  auto-   │ binary_sensor│
-│ human/vehicle│               │ publishes ON       │discovery │ .motion_...  │
-└─────────────┘               └──────────────────┘          └─────────────┘
+Prama Camera                     custom_components/prama/
+┌─────────────┐     HTTPS        ┌──────────────────────────────────┐
+│ alertStream  │────────────────→│ AlertStreamManager               │
+│ (Digest Auth)│  multipart XML  │   (daemon thread per camera)     │
+│              │                 │                                   │
+│ On-device AI │                 │ PramaMotionBinarySensor           │
+│ human/vehicle│                 │   auto-off via async_call_later   │
+└─────────────┘                 └──────────────────────────────────┘
 ```
 
 ## Key Files
 
 | File | Purpose |
 |------|---------|
-| `prama_alert_bridge.py` | Main bridge script — connects to alertStream, parses XML, publishes to MQTT |
-| `config.yaml` | Camera + MQTT credentials (local dev) |
-| `config.json` | HA add-on manifest (name, options schema, arch) |
-| `Dockerfile` | Container build for HA add-on |
-| `run.sh` | Entry point — reads HA add-on options, generates config, starts bridge |
-| `requirements.txt` | Python deps: requests, paho-mqtt, pyyaml |
+| `custom_components/prama/__init__.py` | Integration setup, startup validation, entry load/unload |
+| `custom_components/prama/config_flow.py` | Config flow with pramaAPI credential validation |
+| `custom_components/prama/binary_sensor.py` | Motion detection entity with auto-off timer |
+| `custom_components/prama/alert_stream.py` | AlertStreamManager — daemon thread, reconnect loop, XML parsing |
+| `custom_components/prama/const.py` | Constants (domain, config keys, API endpoints) |
+| `custom_components/prama/manifest.json` | Integration metadata |
+| `custom_components/prama/strings.json` | Config flow UI strings |
 | `pramaproto.md` | Full reverse-engineered protocol documentation |
 
 ## How It Works
 
-1. **Connects** to `https://<camera>/pramaAPI/Event/notification/alertStream` with HTTP Digest Auth
-2. **Reads** multipart chunked HTTP response, splits on `--boundary`, extracts XML
-3. **Filters** for `eventType=VMD` + `targetType=human` (or vehicle, configurable)
-4. **Publishes** `ON` to MQTT state topic on each detection
-5. **HA auto-discovery**: publishes retained config to `homeassistant/binary_sensor/prama_human/config` so HA auto-creates the entity
-6. **off_delay**: HA automatically turns the sensor OFF after 120 seconds of no new ON messages
-
-## MQTT Topics
-
-| Topic | Payload | Retained | Purpose |
-|-------|---------|----------|---------|
-| `homeassistant/binary_sensor/prama_human/config` | JSON discovery | Yes | HA auto-creates binary_sensor |
-| `prama/motion/human/state` | `ON` | No | Trigger sensor on detection |
-| `prama/motion/human/attributes` | JSON | No | last_detection_time, target_type, channel |
-| `prama/motion/human/availability` | `online`/`offline` | Yes | Bridge online status |
-
-## HA Entity Created
-
-`binary_sensor.motion_detected_with_occupancy_timeout_prama`
-
-This matches the naming pattern of the existing 6 TP-Link cameras which use ONVIF:
-- `binary_sensor.motion_detected_with_occupancy_timeout_front`
-- `binary_sensor.motion_detected_with_occupancy_timeout_back`
-- `binary_sensor.motion_detected_with_occupancy_timeout_left`
-- etc.
+1. **Config flow** validates credentials by calling `https://<host>/pramaAPI/System/deviceInfo` with Digest Auth
+2. **On setup**, creates `PramaMotionBinarySensor` and starts `AlertStreamManager` in a daemon thread
+3. **AlertStreamManager** connects to `alertStream`, reads multipart XML chunks, splits on `--boundary`
+4. **Filters** for `eventType=VMD` + `targetType=human` (default)
+5. **Posts** detections to HA event loop via `hass.loop.call_soon_threadsafe(callback, alert)`
+6. **Sensor** turns ON, schedules auto-OFF after `off_delay` seconds via `async_call_later`
+7. **Auto-reconnects** with exponential backoff (5s → 60s) on connection loss
 
 ## Camera API Protocol
 
@@ -87,30 +78,29 @@ See `pramaproto.md` for the complete reverse-engineered protocol reference.
 - Human detection is ONLY available via pramaAPI, NOT via ONVIF
 - ONVIF must be explicitly enabled in camera web UI (disabled by default)
 - Both PT-NC163D3 (6MP) and PT-NC140D7 (4MP) use identical pramaAPI
-- Single add-on instance supports multiple cameras (v2.0.0+) via `cameras` array in config
 
 ## Development
 
-### Running Locally
+### Deploying to HA
 ```bash
-pip install -r requirements.txt
-python3 prama_alert_bridge.py
+# Upload via Samba
+smbclient //192.168.1.20/config -U "xxx%yyy" -c "cd custom_components\\prama; put <file>"
+# ALWAYS clear bytecode cache after upload
+smbclient //192.168.1.20/config -U "xxx%yyy" -c "cd custom_components\\prama\\__pycache__; del <file>.cpython-314.pyc"
 ```
 
-### Testing MQTT
-```bash
-mosquitto_sub -h <ha_ip> -u <user> -P <pass> -t "prama/motion/#" -v
-```
+### Critical: Lazy Imports
+Never import `requests`, `urllib3`, or other blocking libraries at module top level. Always import inside the blocking function that runs via `async_add_executor_job`. Top-level `urllib3.disable_warnings()` causes 500 errors on HA with Python 3.14.
 
 ### Verifying in HA
-Developer Tools → States → search for `binary_sensor.motion_detected_with_occupancy_timeout_prama`
+Developer Tools → States → search for `binary_sensor.prama_`
 
 ## Dashboard Integration
 
 The Prama camera is integrated into the "Mainest" dashboard (`dashboard-mainest`):
 
 **Security view:**
-- Conditional camera card (`camera.six_mp_one_mainstream`) — visible when motion detected
+- Conditional camera card — visible when motion detected
 - Person detection tile (red, mdi:motion-sensor, 3x2 grid) — matches other cameras
 
 **Home view:**
