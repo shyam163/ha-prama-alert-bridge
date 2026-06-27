@@ -1,6 +1,6 @@
 {
   "domain": "prama",
-  "name": "Prama Camera",
+  "name": "Prama Camera AI Alert Bridge",
   "codeowners": ["@shyam163"],
   "config_flow": true,
   "documentation": "https://github.com/shyam163/ha-prama-alert-bridge",
@@ -8,5 +8,5 @@
   "iot_class": "local_push",
   "issue_tracker": "https://github.com/shyam163/ha-prama-alert-bridge/issues",
   "requirements": ["requests>=2.31.0"],
-  "version": "1.0.1"
+  "version": "1.0.2"
 }
