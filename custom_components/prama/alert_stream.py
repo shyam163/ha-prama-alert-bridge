@@ -9,10 +9,6 @@ import threading
 import time
 import xml.etree.ElementTree as ET
 
-import requests
-import urllib3
-from requests.auth import HTTPDigestAuth
-
 from .const import (
     MAX_RECONNECT_DELAY,
     MIN_RECONNECT_DELAY,
@@ -21,9 +17,6 @@ from .const import (
 )
 
 _LOGGER = logging.getLogger(__name__)
-
-# Prama cameras use self-signed certificates
-urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 
 def parse_alert_xml(xml_text):
@@ -88,6 +81,8 @@ class AlertStreamManager:
 
     def _run_loop(self):
         """Reconnect loop with exponential backoff."""
+        import requests
+
         backoff = MIN_RECONNECT_DELAY
         while not self._stop_event.is_set():
             try:
@@ -112,6 +107,13 @@ class AlertStreamManager:
 
     def _stream_alerts(self):
         """Connect and process alert stream. Blocks until disconnect."""
+        import requests
+        import urllib3
+        from requests.auth import HTTPDigestAuth
+
+        # Prama cameras use self-signed certificates
+        urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
         url = f"https://{self._host}{PRAMA_API_ALERT_STREAM}"
         auth = HTTPDigestAuth(self._username, self._password)
 

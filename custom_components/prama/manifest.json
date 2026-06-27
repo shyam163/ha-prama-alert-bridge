@@ -6,6 +6,7 @@
   "documentation": "https://github.com/shyam163/ha-prama-alert-bridge",
   "integration_type": "hub",
   "iot_class": "local_push",
+  "issue_tracker": "https://github.com/shyam163/ha-prama-alert-bridge/issues",
   "requirements": ["requests>=2.31.0"],
   "version": "1.0.0"
 }
